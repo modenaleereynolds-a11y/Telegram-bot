@@ -247,11 +247,15 @@ async def morning_shortlist(context: CallbackContext):
 
 
 # ---------------------------------
-# LIVE MATCH FUNCTIONS (20-FEED ROTATION)
+# LIVE MATCH FUNCTIONS (WORLDWIDE)
 # ---------------------------------
 async def get_live_matches():
+    """
+    Fetch live match IDs from Flashscore worldwide feed rotation.
+    """
     global ACTIVE_FEED
 
+    # Bases and language suffixes used to build full feed URLs
     FEED_BASES = [
         "f_1_0_3",
         "f_1_0_2",
@@ -261,7 +265,6 @@ async def get_live_matches():
         "f_1_0_5",
         "f_1_0_6"
     ]
-
     LANG_SUFFIXES = ["en_1", "en_2", "en_3"]
 
     FEEDS = []
@@ -271,7 +274,7 @@ async def get_live_matches():
 
     for feed in FEEDS:
         url = f"https://d.flashscore.com/x/feed/{feed}"
-        logger.info(f"Trying feed: {feed}")
+        logger.info(f"Trying feed: {feed} ({url})")
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -305,6 +308,9 @@ async def get_live_matches():
 
 
 async def get_match_stats(match_id):
+    """
+    Fetch stats for a specific match.
+    """
     url = f"https://d.flashscore.com/x/feed/d_{match_id}_en_1"
 
     async with aiohttp.ClientSession() as session:
@@ -386,7 +392,6 @@ def qualifies_for_overs(stats):
     )
 
 
-# >>> FIRST-HALF GOAL ADDITION
 # ---------------------------------
 # LIVE O0.5 ODDS FETCHER
 # ---------------------------------
@@ -423,7 +428,6 @@ async def get_live_odds(match_id):
     return odds
 
 
-# >>> FIRST-HALF GOAL ADDITION
 # ---------------------------------
 # FIRST-HALF GOAL FILTER
 # ---------------------------------
@@ -478,7 +482,7 @@ async def check_matches(context: CallbackContext):
         currently_monitoring.append(match_name)
         matches_checked += 1
 
-        # >>> FIRST-HALF GOAL ADDITION
+        # FIRST-HALF GOAL TRIGGER
         odds = await get_live_odds(match_id)
 
         if qualifies_for_first_half_goal(stats, odds) and match_id not in already_alerted:
@@ -559,6 +563,7 @@ def main():
     app.add_handler(CommandHandler("resetstats", resetstats))
     app.add_handler(CommandHandler("lastalert", lastalert_cmd))
 
+    # Instant scanning: every 60 seconds
     app.job_queue.run_repeating(check_matches, interval=60, first=10)
 
     app.job_queue.run_daily(
