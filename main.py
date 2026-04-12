@@ -165,22 +165,18 @@ async def send_startup_message(app):
 # PRE-MATCH PLACEHOLDERS
 # ---------------------------------
 def get_todays_fixtures():
-    # Placeholder – plug in your own data source here
     return []
 
 
 def get_last_five_stats(team):
-    # Placeholder – plug in your own stats source here
     return {"avg_goals_scored": 0, "btts_percent": 0}
 
 
 def get_h2h_stats(home, away):
-    # Placeholder – plug in your own H2H source here
     return {"avg_goals": 0}
 
 
 def get_odds(match_id):
-    # Placeholder – plug in your own odds source here
     return {"over25": 3.00}
 
 
@@ -254,13 +250,8 @@ async def morning_shortlist(context: CallbackContext):
 # LIVE MATCH FUNCTIONS (20-FEED ROTATION)
 # ---------------------------------
 async def get_live_matches():
-    """
-    Tries multiple Flashscore feeds in sequence until one returns live matches.
-    Uses pattern-based generation for EN1, EN2, EN3 variants.
-    """
     global ACTIVE_FEED
 
-    # Base feed patterns (most common live feeds)
     FEED_BASES = [
         "f_1_0_3",
         "f_1_0_2",
@@ -271,16 +262,12 @@ async def get_live_matches():
         "f_1_0_6"
     ]
 
-    # Language/variant suffixes (EN1, EN2, EN3)
     LANG_SUFFIXES = ["en_1", "en_2", "en_3"]
 
     FEEDS = []
     for base in FEED_BASES:
         for lang in LANG_SUFFIXES:
             FEEDS.append(f"{base}_{lang}")
-
-    # Ensure we have at least ~20 feeds (7 bases * 3 langs = 21)
-    # That matches your Option B choice.
 
     for feed in FEEDS:
         url = f"https://d.flashscore.com/x/feed/{feed}"
@@ -345,18 +332,15 @@ async def get_match_stats(match_id):
         code = item[0]
 
         if code == "event":
-            # [ "event", match_id, home, away, ... ]
             if len(item) > 3:
                 stats["home"] = item[2]
                 stats["away"] = item[3]
 
         elif code == "score":
-            # [ "score", "1-0", ... ]
             if len(item) > 1:
                 stats["score"] = item[1]
 
         elif code == "time":
-            # [ "time", "63", ... ]
             if len(item) > 1:
                 try:
                     stats["minute"] = int(item[1])
@@ -364,7 +348,6 @@ async def get_match_stats(match_id):
                     stats["minute"] = 0
 
         elif code == "stat":
-            # [ "stat", "Shots on Target", "3", ... ]
             if len(item) > 2:
                 label = item[1]
                 try:
@@ -403,6 +386,63 @@ def qualifies_for_overs(stats):
     )
 
 
+# >>> FIRST-HALF GOAL ADDITION
+# ---------------------------------
+# LIVE O0.5 ODDS FETCHER
+# ---------------------------------
+async def get_live_odds(match_id):
+    url = f"https://d.flashscore.com/x/feed/od_{match_id}_en_1"
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers={"User-Agent": "Mozilla/5.0"}) as response:
+                text = await response.text()
+        except:
+            return {"over05": None}
+
+    cleaned = text.replace("])}while(1);</x>", "")
+
+    try:
+        data = json.loads(cleaned)
+    except:
+        return {"over05": None}
+
+    odds = {"over05": None}
+
+    for item in data:
+        if not isinstance(item, list):
+            continue
+
+        if item[0] == "odds" and len(item) > 2:
+            if item[1] == "O0.5":
+                try:
+                    odds["over05"] = float(item[2])
+                except:
+                    odds["over05"] = None
+
+    return odds
+
+
+# >>> FIRST-HALF GOAL ADDITION
+# ---------------------------------
+# FIRST-HALF GOAL FILTER
+# ---------------------------------
+def qualifies_for_first_half_goal(stats, odds):
+    if odds["over05"] is None:
+        return False
+
+    pressure = calc_pressure(stats)
+
+    return (
+        stats["minute"] <= 45 and
+        stats["score"] == "0-0" and
+        stats["shots_on_target"] >= 2 and
+        stats["dangerous_attacks"] >= 30 and
+        pressure >= 20 and
+        1.90 <= odds["over05"] <= 2.10
+    )
+
+
 # ---------------------------------
 # JOB: CHECK MATCHES
 # ---------------------------------
@@ -438,6 +478,30 @@ async def check_matches(context: CallbackContext):
         currently_monitoring.append(match_name)
         matches_checked += 1
 
+        # >>> FIRST-HALF GOAL ADDITION
+        odds = await get_live_odds(match_id)
+
+        if qualifies_for_first_half_goal(stats, odds) and match_id not in already_alerted:
+            already_alerted.add(match_id)
+
+            message = (
+                f"⚡ First-Half Goal Trigger!\n"
+                f"{match_name}\n"
+                f"Minute: {stats['minute']}\n"
+                f"Score: {stats['score']}\n"
+                f"Shots on Target: {stats['shots_on_target']}\n"
+                f"Dangerous Attacks: {stats['dangerous_attacks']}\n"
+                f"Pressure: {calc_pressure(stats)}\n"
+                f"Live O0.5 Odds: {odds['over05']}\n"
+            )
+
+            now = datetime.now()
+            if not in_quiet_hours(now):
+                await bot.send_message(chat_id=CHAT_ID, text=message)
+            else:
+                logger.info(f"Quiet hours – first-half alert suppressed for {match_name}")
+
+        # EXISTING OVERS TRIGGER
         if not qualifies_for_overs(stats):
             continue
 
@@ -495,10 +559,8 @@ def main():
     app.add_handler(CommandHandler("resetstats", resetstats))
     app.add_handler(CommandHandler("lastalert", lastalert_cmd))
 
-    # Live match scanner
     app.job_queue.run_repeating(check_matches, interval=60, first=10)
 
-    # Morning shortlist at 09:00
     app.job_queue.run_daily(
         morning_shortlist,
         time=time(9, 0),
