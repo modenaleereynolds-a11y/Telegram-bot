@@ -1,48 +1,84 @@
+import os
+import logging
+import json
+import aiohttp
+from datetime import time, datetime
+from telegram import Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackContext
+
 # ---------------------------------
-# LIVE MATCH FUNCTIONS (UPDATED WITH FEED ROTATION)
+# LOGGING
 # ---------------------------------
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-ACTIVE_FEED = None  # shows which feed is currently working
+# ---------------------------------
+# ENV VARS
+# ---------------------------------
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-async def get_live_matches():
-    global ACTIVE_FEED
+# ---------------------------------
+# CONFIG
+# ---------------------------------
+QUIET_START_HOUR = 23
+QUIET_END_HOUR = 6
+QUIET_END_MINUTE = 30
 
-    FEEDS = [
-        "f_1_0_3_en_1",
-        "f_1_0_2_en_1",
-        "f_1_0_1_en_1",
-        "f_1_0_4_en_1",
-        "f_1_0__en_1"
-    ]
+MIN_O25_PRE = 1.80
+MAX_O25_PRE = 2.40
 
-    for feed in FEEDS:
-        url = f"https://d.flashscore.com/x/feed/{feed}"
+MIN_PRESSURE = 30
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers={"User-Agent": "Mozilla/5.0"}) as response:
-                    text = await response.text()
-                    cleaned = text.replace("])}while(1);</x>", "")
+# ---------------------------------
+# GLOBAL STATE
+# ---------------------------------
+last_scan_time = None
+matches_checked = 0
+alerts_sent_today = 0
+currently_monitoring = []
 
-                    try:
-                        data = json.loads(cleaned)
-                    except:
-                        continue  # try next feed
+already_alerted = set()
+last_alert = None
 
-                    match_ids = []
+ACTIVE_FEED = None  # NEW — shows which Flashscore feed is working
 
-                    for item in data:
-                        if item[0] == "event":
-                            match_ids.append(item[1])
 
-                    # If this feed returned matches, lock onto it
-                    if match_ids:
-                        ACTIVE_FEED = feed
-                        return match_ids
+# ---------------------------------
+# HELPERS
+# ---------------------------------
+def in_quiet_hours(now: datetime) -> bool:
+    start = now.replace(hour=QUIET_START_HOUR, minute=0, second=0, microsecond=0)
 
-        except Exception:
-            continue  # try next feed
+    if QUIET_END_HOUR < QUIET_START_HOUR or (
+        QUIET_END_HOUR == QUIET_START_HOUR and QUIET_END_MINUTE > 0
+    ):
+        end = now.replace(hour=QUIET_END_HOUR, minute=QUIET_END_MINUTE,
+                          second=0, microsecond=0)
+        return now >= start or now < end
+    else:
+        end = now.replace(hour=QUIET_END_HOUR, minute=QUIET_END_MINUTE,
+                          second=0, microsecond=0)
+        return start <= now < end
 
-    # If no feed worked
-    ACTIVE_FEED = "None working"
-    return []
+
+def calc_pressure(stats: dict) -> float:
+    return stats["shots_on_target"] * 5 + stats["dangerous_attacks"] * 0.5
+
+
+# ---------------------------------
+# COMMANDS
+# ---------------------------------
+async def start(update, context):
+    if update.message:
+        await update.message.reply_text("Bot is running!")
+
+
+async def status(update, context):
+    if not update.message:
+        return
+
+    global last_scan_time, matches_checked, alerts_sent_today, currently_monitoring, last_alert,
