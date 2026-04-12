@@ -129,8 +129,8 @@ def main():
     app.add_handler(CommandHandler("start", start))
 
     # Scheduler: check every 60 seconds
-    job_queue = app.job_queue
-    job_queue.run_repeating(check_matches, interval=60, first=10)
+    app.job_queue.run_repeating(check_matches, interval=60, first=10)
+
 
     # Start bot
     app.run_polling()
