@@ -44,7 +44,7 @@ currently_monitoring = []
 already_alerted = set()
 last_alert = None
 
-ACTIVE_FEED = None  # will show which feed is currently working
+ACTIVE_FEED = None
 
 
 # ---------------------------------
@@ -53,7 +53,6 @@ ACTIVE_FEED = None  # will show which feed is currently working
 def in_quiet_hours(now: datetime) -> bool:
     start = now.replace(hour=QUIET_START_HOUR, minute=0, second=0, microsecond=0)
 
-    # Quiet hours cross midnight (e.g. 23:00–06:30)
     if QUIET_END_HOUR < QUIET_START_HOUR or (
         QUIET_END_HOUR == QUIET_START_HOUR and QUIET_END_MINUTE > 0
     ):
@@ -65,7 +64,6 @@ def in_quiet_hours(now: datetime) -> bool:
         )
         return now >= start or now < end
     else:
-        # Quiet hours do not cross midnight
         end = now.replace(
             hour=QUIET_END_HOUR,
             minute=QUIET_END_MINUTE,
@@ -247,34 +245,24 @@ async def morning_shortlist(context: CallbackContext):
 
 
 # ---------------------------------
-# LIVE MATCH FUNCTIONS (WORLDWIDE)
+# LIVE MATCH FUNCTIONS (UPDATED)
 # ---------------------------------
 async def get_live_matches():
     """
-    Fetch live match IDs from Flashscore worldwide feed rotation.
+    Fetch live match IDs from Flashscore using the NEW working feed family (ls_).
     """
     global ACTIVE_FEED
 
-    # Bases and language suffixes used to build full feed URLs
-    FEED_BASES = [
-        "f_1_0_3",
-        "f_1_0_2",
-        "f_1_0_1",
-        "f_1_0_4",
-        "f_1_0_0",
-        "f_1_0_5",
-        "f_1_0_6"
+    NEW_FEEDS = [
+        "ls_1_0_0_en_1",
+        "ls_1_0_1_en_1",
+        "ls_1_0_2_en_1",
+        "ls_1_0_3_en_1",
     ]
-    LANG_SUFFIXES = ["en_1", "en_2", "en_3"]
 
-    FEEDS = []
-    for base in FEED_BASES:
-        for lang in LANG_SUFFIXES:
-            FEEDS.append(f"{base}_{lang}")
-
-    for feed in FEEDS:
+    for feed in NEW_FEEDS:
         url = f"https://d.flashscore.com/x/feed/{feed}"
-        logger.info(f"Trying feed: {feed} ({url})")
+        logger.info(f"Trying NEW feed: {feed} ({url})")
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -285,32 +273,34 @@ async def get_live_matches():
                     try:
                         data = json.loads(cleaned)
                     except Exception as e:
-                        logger.warning(f"JSON error on feed {feed}: {e}")
+                        logger.warning(f"JSON error on new feed {feed}: {e}")
                         continue
 
                     match_ids = [
                         item[1] for item in data
-                        if isinstance(item, list) and len(item) > 1 and item[0] == "event"
+                        if isinstance(item, list)
+                        and len(item) > 1
+                        and item[0] == "event"
                     ]
 
                     if match_ids:
                         ACTIVE_FEED = feed
-                        logger.info(f"Active feed set to: {feed} with {len(match_ids)} matches")
+                        logger.info(f"NEW ACTIVE FEED: {feed} with {len(match_ids)} matches")
                         return match_ids
 
         except Exception as e:
-            logger.error(f"Feed error ({feed}): {e}")
+            logger.error(f"New feed error ({feed}): {e}")
             continue
 
     ACTIVE_FEED = "None working"
-    logger.warning("No working feed found from the configured list.")
+    logger.warning("No working NEW feed found.")
     return []
 
 
+# ---------------------------------
+# MATCH STATS
+# ---------------------------------
 async def get_match_stats(match_id):
-    """
-    Fetch stats for a specific match.
-    """
     url = f"https://d.flashscore.com/x/feed/d_{match_id}_en_1"
 
     async with aiohttp.ClientSession() as session:
@@ -380,6 +370,9 @@ def default_stats():
     }
 
 
+# ---------------------------------
+# OVERS TRIGGER
+# ---------------------------------
 def qualifies_for_overs(stats):
     pressure = calc_pressure(stats)
 
@@ -393,7 +386,7 @@ def qualifies_for_overs(stats):
 
 
 # ---------------------------------
-# LIVE O0.5 ODDS FETCHER
+# LIVE O0.5 ODDS
 # ---------------------------------
 async def get_live_odds(match_id):
     url = f"https://d.flashscore.com/x/feed/od_{match_id}_en_1"
@@ -429,7 +422,7 @@ async def get_live_odds(match_id):
 
 
 # ---------------------------------
-# FIRST-HALF GOAL FILTER
+# FIRST-HALF GOAL TRIGGER
 # ---------------------------------
 def qualifies_for_first_half_goal(stats, odds):
     if odds["over05"] is None:
@@ -502,10 +495,8 @@ async def check_matches(context: CallbackContext):
             now = datetime.now()
             if not in_quiet_hours(now):
                 await bot.send_message(chat_id=CHAT_ID, text=message)
-            else:
-                logger.info(f"Quiet hours – first-half alert suppressed for {match_name}")
 
-        # EXISTING OVERS TRIGGER
+        # OVERS TRIGGER
         if not qualifies_for_overs(stats):
             continue
 
@@ -539,9 +530,7 @@ async def check_matches(context: CallbackContext):
             f"Pressure: {pressure}\n"
         )
 
-        if in_quiet_hours(now):
-            logger.info(f"Quiet hours – alert suppressed for {match_name}")
-        else:
+        if not in_quiet_hours(now):
             await bot.send_message(chat_id=CHAT_ID, text=message)
 
     last_scan_time = datetime.now().strftime("%H:%M:%S")
@@ -563,7 +552,6 @@ def main():
     app.add_handler(CommandHandler("resetstats", resetstats))
     app.add_handler(CommandHandler("lastalert", lastalert_cmd))
 
-    # Instant scanning: every 60 seconds
     app.job_queue.run_repeating(check_matches, interval=60, first=10)
 
     app.job_queue.run_daily(
