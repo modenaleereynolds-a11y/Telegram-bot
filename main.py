@@ -24,14 +24,15 @@ async def send_startup_message(app):
 
 def main():
     # Build the bot application
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .post_init(send_startup_message)
+        .build()
+    )
 
     # Add commands
     app.add_handler(CommandHandler("start", start))
-
-    # Send a message when the bot boots
-   app = ApplicationBuilder().token(BOT_TOKEN).post_init(send_startup_message).build()
-
 
     # Start polling
     app.run_polling()
