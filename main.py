@@ -44,7 +44,7 @@ currently_monitoring = []
 already_alerted = set()
 last_alert = None
 
-ACTIVE_FEED = None  # NEW — shows which Flashscore feed is working
+ACTIVE_FEED = None  # will show which feed is currently working
 
 
 # ---------------------------------
@@ -53,15 +53,25 @@ ACTIVE_FEED = None  # NEW — shows which Flashscore feed is working
 def in_quiet_hours(now: datetime) -> bool:
     start = now.replace(hour=QUIET_START_HOUR, minute=0, second=0, microsecond=0)
 
+    # Quiet hours cross midnight (e.g. 23:00–06:30)
     if QUIET_END_HOUR < QUIET_START_HOUR or (
         QUIET_END_HOUR == QUIET_START_HOUR and QUIET_END_MINUTE > 0
     ):
-        end = now.replace(hour=QUIET_END_HOUR, minute=QUIET_END_MINUTE,
-                          second=0, microsecond=0)
+        end = now.replace(
+            hour=QUIET_END_HOUR,
+            minute=QUIET_END_MINUTE,
+            second=0,
+            microsecond=0
+        )
         return now >= start or now < end
     else:
-        end = now.replace(hour=QUIET_END_HOUR, minute=QUIET_END_MINUTE,
-                          second=0, microsecond=0)
+        # Quiet hours do not cross midnight
+        end = now.replace(
+            hour=QUIET_END_HOUR,
+            minute=QUIET_END_MINUTE,
+            second=0,
+            microsecond=0
+        )
         return start <= now < end
 
 
@@ -81,10 +91,13 @@ async def status(update, context):
     if not update.message:
         return
 
-    global last_scan_time, matches_checked, alerts_sent_today, currently_monitoring, last_alert, ACTIVE_FEED
+    global last_scan_time, matches_checked, alerts_sent_today
+    global currently_monitoring, last_alert, ACTIVE_FEED
+
+    feed_display = ACTIVE_FEED if ACTIVE_FEED else "None"
 
     msg = "🤖 *Bot Status*\n\n"
-    msg += f"Active feed: {ACTIVE_FEED}\n"
+    msg += f"Active feed: {feed_display}\n"
     msg += f"Last scan: {last_scan_time if last_scan_time else 'No scans yet'}\n"
     msg += f"Matches checked: {matches_checked}\n"
     msg += f"Alerts sent today: {alerts_sent_today}\n\n"
@@ -152,18 +165,22 @@ async def send_startup_message(app):
 # PRE-MATCH PLACEHOLDERS
 # ---------------------------------
 def get_todays_fixtures():
+    # Placeholder – plug in your own data source here
     return []
 
 
 def get_last_five_stats(team):
+    # Placeholder – plug in your own stats source here
     return {"avg_goals_scored": 0, "btts_percent": 0}
 
 
 def get_h2h_stats(home, away):
+    # Placeholder – plug in your own H2H source here
     return {"avg_goals": 0}
 
 
 def get_odds(match_id):
+    # Placeholder – plug in your own odds source here
     return {"over25": 3.00}
 
 
@@ -234,21 +251,40 @@ async def morning_shortlist(context: CallbackContext):
 
 
 # ---------------------------------
-# LIVE MATCH FUNCTIONS (WITH FEED ROTATION)
+# LIVE MATCH FUNCTIONS (20-FEED ROTATION)
 # ---------------------------------
 async def get_live_matches():
+    """
+    Tries multiple Flashscore feeds in sequence until one returns live matches.
+    Uses pattern-based generation for EN1, EN2, EN3 variants.
+    """
     global ACTIVE_FEED
 
-    FEEDS = [
-        "f_1_0_3_en_1",
-        "f_1_0_2_en_1",
-        "f_1_0_1_en_1",
-        "f_1_0_4_en_1",
-        "f_1_0__en_1"
+    # Base feed patterns (most common live feeds)
+    FEED_BASES = [
+        "f_1_0_3",
+        "f_1_0_2",
+        "f_1_0_1",
+        "f_1_0_4",
+        "f_1_0_0",
+        "f_1_0_5",
+        "f_1_0_6"
     ]
+
+    # Language/variant suffixes (EN1, EN2, EN3)
+    LANG_SUFFIXES = ["en_1", "en_2", "en_3"]
+
+    FEEDS = []
+    for base in FEED_BASES:
+        for lang in LANG_SUFFIXES:
+            FEEDS.append(f"{base}_{lang}")
+
+    # Ensure we have at least ~20 feeds (7 bases * 3 langs = 21)
+    # That matches your Option B choice.
 
     for feed in FEEDS:
         url = f"https://d.flashscore.com/x/feed/{feed}"
+        logger.info(f"Trying feed: {feed}")
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -258,7 +294,8 @@ async def get_live_matches():
 
                     try:
                         data = json.loads(cleaned)
-                    except:
+                    except Exception as e:
+                        logger.warning(f"JSON error on feed {feed}: {e}")
                         continue
 
                     match_ids = [
@@ -268,6 +305,7 @@ async def get_live_matches():
 
                     if match_ids:
                         ACTIVE_FEED = feed
+                        logger.info(f"Active feed set to: {feed} with {len(match_ids)} matches")
                         return match_ids
 
         except Exception as e:
@@ -275,6 +313,7 @@ async def get_live_matches():
             continue
 
     ACTIVE_FEED = "None working"
+    logger.warning("No working feed found from the configured list.")
     return []
 
 
@@ -306,29 +345,37 @@ async def get_match_stats(match_id):
         code = item[0]
 
         if code == "event":
-            stats["home"] = item[2]
-            stats["away"] = item[3]
+            # [ "event", match_id, home, away, ... ]
+            if len(item) > 3:
+                stats["home"] = item[2]
+                stats["away"] = item[3]
 
         elif code == "score":
-            stats["score"] = item[1]
+            # [ "score", "1-0", ... ]
+            if len(item) > 1:
+                stats["score"] = item[1]
 
         elif code == "time":
-            try:
-                stats["minute"] = int(item[1])
-            except:
-                stats["minute"] = 0
+            # [ "time", "63", ... ]
+            if len(item) > 1:
+                try:
+                    stats["minute"] = int(item[1])
+                except Exception:
+                    stats["minute"] = 0
 
         elif code == "stat":
-            label = item[1]
-            try:
-                value = int(item[2])
-            except:
-                value = 0
+            # [ "stat", "Shots on Target", "3", ... ]
+            if len(item) > 2:
+                label = item[1]
+                try:
+                    value = int(item[2])
+                except Exception:
+                    value = 0
 
-            if label == "Shots on Target":
-                stats["shots_on_target"] = value
-            elif label == "Dangerous Attacks":
-                stats["dangerous_attacks"] = value
+                if label == "Shots on Target":
+                    stats["shots_on_target"] = value
+                elif label == "Dangerous Attacks":
+                    stats["dangerous_attacks"] = value
 
     return stats
 
@@ -384,7 +431,10 @@ async def check_matches(context: CallbackContext):
             logger.error(f"Error fetching stats for {match_id}: {e}")
             continue
 
-        match_name = f"{stats['home']} vs {stats['away']}"
+        match_name = f"{stats['home']} vs {stats['away']}".strip()
+        if not match_name.strip():
+            match_name = f"Match {match_id}"
+
         currently_monitoring.append(match_name)
         matches_checked += 1
 
@@ -445,8 +495,10 @@ def main():
     app.add_handler(CommandHandler("resetstats", resetstats))
     app.add_handler(CommandHandler("lastalert", lastalert_cmd))
 
+    # Live match scanner
     app.job_queue.run_repeating(check_matches, interval=60, first=10)
 
+    # Morning shortlist at 09:00
     app.job_queue.run_daily(
         morning_shortlist,
         time=time(9, 0),
