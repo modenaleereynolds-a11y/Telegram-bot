@@ -246,7 +246,12 @@ async def check_matches(context):
             alerts_sent_today += 1
 
             message = (
-                f"🔥 Overs Trigger!\n"
-                f"{stats['home']} vs {stats['away']}\n"
-                f"Minute: {stats['minute']}\n"
+    f"🔥 Overs Trigger!\n"
+    f"{stats['home']} vs {stats['away']}\n"
+    f"Minute: {stats['minute']}\n"
+    f"Score: {stats['score']}\n"
+    f"Shots on Target: {stats['shots_on_target']}\n"
+    f"Dangerous Attacks: {stats['dangerous_attacks']}\n"
+)
+
                
