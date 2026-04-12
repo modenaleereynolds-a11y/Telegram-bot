@@ -81,4 +81,5 @@ async def status(update, context):
     if not update.message:
         return
 
-    global last_scan_time, matches_checked, alerts_sent_today, currently_monitoring, last_alert,
+    global last_scan_time, matches_checked, alerts_sent_today, currently_monitoring, last_alert
+
