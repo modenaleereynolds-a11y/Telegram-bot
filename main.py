@@ -227,22 +227,33 @@ def qualifies_for_overs(stats):
     )
 
 # -----------------------------
-# JOB: CHECK MATCHES
+# JOB: CHECK MATCHES (CRASH-PROOF)
 # -----------------------------
-async def check_matches(context):
+async def check_matches(context: CallbackContext):
     global last_scan_time, matches_checked, alerts_sent_today, currently_monitoring
 
     bot = context.bot
-
-    match_ids = await get_live_matches()
     currently_monitoring = []  # reset list each cycle
 
+    try:
+        match_ids = await get_live_matches()
+    except Exception as e:
+        print("Error fetching live matches:", e)
+        last_scan_time = datetime.now().strftime("%H:%M:%S")
+        return
+
+    if not match_ids:
+        last_scan_time = datetime.now().strftime("%H:%M:%S")
+        return
+
     for match_id in match_ids:
-        stats = await get_match_stats(match_id)
+        try:
+            stats = await get_match_stats(match_id)
+        except Exception as e:
+            print(f"Error fetching stats for {match_id}:", e)
+            continue
 
-        # Track monitoring list
         currently_monitoring.append(f"{stats['home']} vs {stats['away']}")
-
         matches_checked += 1
 
         if qualifies_for_overs(stats):
