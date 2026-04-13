@@ -87,6 +87,34 @@ def extract_stat_value(label: str, value_raw) -> int:
             return int(float(value_raw))
         except Exception:
             return 0
+async def get_last_10_o25_rate(team_id: int) -> float:
+    """
+    Fetch last 10 matches for a team from Sofascore and calculate % Over 2.5.
+    Returns a number between 0 and 100.
+    """
+    url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/10"
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return 0
+                data = await resp.json()
+        except Exception:
+            return 0
+
+    events = data.get("events", [])
+    if not events:
+        return 0
+
+    o25_count = 0
+    for ev in events:
+        home = ev.get("homeScore", {}).get("current", 0)
+        away = ev.get("awayScore", {}).get("current", 0)
+        if home + away >= 3:
+            o25_count += 1
+
+    return (o25_count / len(events)) * 100
 
 # ---------------------------------
 # TELEGRAM COMMANDS
@@ -218,6 +246,74 @@ async def morning_shortlist(context: CallbackContext):
             f"O2.5 odds: {m['odds']}\n"
             f"*Suggested bet:* {m['recommended']}\n\n"
         )
+    await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
+async def daily_acca(context: CallbackContext):
+    chat_id = int(CHAT_ID)
+
+    # Fetch today's fixtures (your placeholder function)
+    fixtures = get_todays_fixtures()
+    if not fixtures:
+        await context.bot.send_message(chat_id, "No fixtures available for today's ACCA.")
+        return
+
+    acca_list = []
+
+    for match in fixtures:
+        home = match["home"]
+        away = match["away"]
+        home_id = match.get("home_id")
+        away_id = match.get("away_id")
+
+        if not home_id or not away_id:
+            continue
+
+        # Get last-10 O2.5 rates
+        home_o25 = await get_last_10_o25_rate(home_id)
+        away_o25 = await get_last_10_o25_rate(away_id)
+        combined = (home_o25 + away_o25) / 2
+
+        # Only keep strong O2.5 candidates
+        if combined >= 70:
+            odds = get_odds(match["id"])
+            o25 = odds.get("over25", None)
+            if o25:
+                acca_list.append({
+                    "home": home,
+                    "away": away,
+                    "home_o25": round(home_o25),
+                    "away_o25": round(away_o25),
+                    "combined": round(combined),
+                    "odds": o25
+                })
+
+    if len(acca_list) < 3:
+        await context.bot.send_message(chat_id, "No suitable 3-leg O2.5 ACCA found today.")
+        return
+
+    # Sort by combined O2.5 %
+    acca_list.sort(key=lambda x: x["combined"], reverse=True)
+
+    # Take top 3
+    picks = acca_list[:3]
+
+    # Calculate combined odds
+    acca_price = round(picks[0]["odds"] * picks[1]["odds"] * picks[2]["odds"], 2)
+
+    # Build message
+    msg = "🎯 *Daily O2.5 ACCA (Stats-Based)*\n"
+    msg += "_Teams with 70%+ Over 2.5 in their last 10 matches._\n\n"
+
+    for p in picks:
+        msg += (
+            f"*{p['home']} vs {p['away']}*\n"
+            f"Home O2.5: {p['home_o25']}%\n"
+            f"Away O2.5: {p['away_o25']}%\n"
+            f"Combined: {p['combined']}%\n"
+            f"O2.5 Odds: {p['odds']}\n\n"
+        )
+
+    msg += f"*Combined ACCA Odds:* {acca_price}"
+
     await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
 
 # ---------------------------------
@@ -529,7 +625,11 @@ def main():
     # Morning shortlist at 09:00
     app.job_queue.run_daily(morning_shortlist, time=time(9, 0), name="morning_shortlist")
 
+    # Daily ACCA at 09:05
+    app.job_queue.run_daily(daily_acca, time=time(9, 5), name="daily_acca")
+
     app.run_polling()
 
 if __name__ == "__main__":
     main()
+
