@@ -225,197 +225,123 @@ async def morning_shortlist(context: CallbackContext):
 # ---------------------------------
 async def get_live_matches():
     """
-    Try multiple mobile JSON feed variants until one returns live match entries.
-    Returns a list of match IDs (strings).
+    Fetch all live football events from Sofascore.
+    Returns a list of match IDs (integers).
     """
-    global ACTIVE_MOBILE_FEED
-    headers = {"User-Agent": "Mozilla/5.0 (Mobile; rv:100.0) Gecko/20100101 Firefox/100.0"}
-    async with aiohttp.ClientSession(headers=headers) as session:
-        for feed in MOBILE_FEEDS:
-            url = f"https://m.flashscore.com/x/feed/{feed}{MOBILE_SUFFIX}/"
-            logger.info(f"Trying mobile feed: {feed} -> {url}")
-            try:
-                async with session.get(url, timeout=15) as resp:
-                    if resp.status != 200:
-                        logger.debug(f"Feed {feed} returned status {resp.status}")
-                        continue
-                    text = await resp.text()
-            except Exception as e:
-                logger.debug(f"Network error for feed {feed}: {e}")
-                continue
+    url = "https://api.sofascore.com/api/v1/sport/football/events/live"
 
-            cleaned = text.replace("])}while(1);</x>", "")
-            try:
-                data = json.loads(cleaned)
-            except Exception as e:
-                logger.debug(f"JSON decode failed for feed {feed}: {e}")
-                continue
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+        except Exception:
+            return []
 
-            # Data structure varies; find event entries robustly
-            match_ids = []
-            for item in data:
-                if not isinstance(item, list):
-                    continue
-                # event entries often start with "event" or have code "event"
-                try:
-                    if item[0] == "event" and len(item) > 1:
-                        match_ids.append(str(item[1]))
-                except Exception:
-                    continue
+    events = data.get("events", [])
+    match_ids = [e["id"] for e in events if "id" in e]
+    return match_ids
 
-            if match_ids:
-                ACTIVE_MOBILE_FEED = feed
-                logger.info(f"Active mobile feed found: {feed} ({len(match_ids)} matches)")
-                return match_ids
-
-    ACTIVE_MOBILE_FEED = "None working"
-    logger.warning("No mobile feed returned matches.")
-    return []
 
 # ---------------------------------
 # MATCH STATS (mobile detail endpoint)
 # ---------------------------------
-async def get_match_stats(match_id: str) -> dict:
+asynasync def get_match_stats(match_id: int) -> dict:
     """
-    Fetch detailed match JSON from mobile detail endpoint and extract:
+    Fetch match details from Sofascore.
+    Extracts:
     - minute
-    - score (string)
-    - shots_on_target (int)
-    - dangerous_attacks (int)
+    - score
+    - shots_on_target
+    - dangerous_attacks
     - home, away names
     """
-    url = f"https://m.flashscore.com/x/feed/d_{match_id}{MOBILE_SUFFIX}/"
-    headers = {"User-Agent": "Mozilla/5.0 (Mobile; rv:100.0) Gecko/20100101 Firefox/100.0"}
-    async with aiohttp.ClientSession(headers=headers) as session:
+    url = f"https://api.sofascore.com/api/v1/event/{match_id}"
+
+    async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, timeout=12) as resp:
+            async with session.get(url, timeout=10) as resp:
                 if resp.status != 200:
-                    logger.debug(f"Detail {match_id} returned status {resp.status}")
                     return default_stats()
-                text = await resp.text()
-        except Exception as e:
-            logger.debug(f"Network error for match {match_id}: {e}")
+                data = await resp.json()
+        except Exception:
             return default_stats()
 
-    cleaned = text.replace("])}while(1);</x>", "")
+    event = data.get("event", {})
+    home = event.get("homeTeam", {}).get("name", "")
+    away = event.get("awayTeam", {}).get("name", "")
+    status = event.get("status", {})
+    minute = status.get("minute", 0)
+
+    # Score
+    home_score = event.get("homeScore", {}).get("current", 0)
+    away_score = event.get("awayScore", {}).get("current", 0)
+    score = f"{home_score}-{away_score}"
+
+    # Statistics endpoint
+    stats_url = f"https://api.sofascore.com/api/v1/event/{match_id}/statistics"
+
+    shots_on_target = 0
+    dangerous_attacks = 0
+
     try:
-        data = json.loads(cleaned)
-    except Exception as e:
-        logger.debug(f"JSON decode error for match {match_id}: {e}")
-        return default_stats()
+        async with session.get(stats_url, timeout=10) as resp:
+            if resp.status == 200:
+                stats_data = await resp.json()
+                for group in stats_data.get("statistics", []):
+                    for item in group.get("statisticsItems", []):
+                        label = item.get("name", "").lower()
+                        home_val = item.get("home", 0)
+                        away_val = item.get("away", 0)
 
-    stats = default_stats()
+                        if "shots on target" in label:
+                            shots_on_target = home_val + away_val
+                        if "dangerous attacks" in label:
+                            dangerous_attacks = home_val + away_val
+    except Exception:
+        pass
 
-    # Iterate and extract robustly
-    for item in data:
-        if not isinstance(item, list) or not item:
-            continue
-        code = item[0]
-
-        # event: names
-        if code == "event" and len(item) > 3:
-            try:
-                stats["home"] = item[2]
-                stats["away"] = item[3]
-            except Exception:
-                pass
-
-        # score
-        elif code == "score" and len(item) > 1:
-            try:
-                stats["score"] = item[1]
-            except Exception:
-                pass
-
-        # time / minute
-        elif code == "time" and len(item) > 1:
-            try:
-                stats["minute"] = int(item[1])
-            except Exception:
-                # sometimes time is like "HT" or "45+2"
-                try:
-                    minute_str = str(item[1]).split("+")[0]
-                    stats["minute"] = int(minute_str)
-                except Exception:
-                    stats["minute"] = 0
-
-        # stat entries: label + value
-        elif code == "stat" and len(item) > 2:
-            label = str(item[1])
-            value_raw = item[2]
-
-            # Flexible matching for Shots on Target
-            if flexible_stat_label_match(label, ["shot", "target"]) or flexible_stat_label_match(label, ["sot"]):
-                stats["shots_on_target"] = extract_stat_value(label, value_raw)
-
-            # Flexible matching for Dangerous Attacks
-            elif flexible_stat_label_match(label, ["danger"]) or flexible_stat_label_match(label, ["attack"]):
-                stats["dangerous_attacks"] = extract_stat_value(label, value_raw)
-
-            # Some feeds use numeric keys or different ordering; attempt to parse common numeric labels
-            else:
-                # fallback: if label contains digits or short forms, try to map
-                low = label.lower()
-                if "on target" in low or "shots on target" in low or "sot" in low:
-                    stats["shots_on_target"] = extract_stat_value(label, value_raw)
-                elif "dangerous" in low or "danger" in low or "attacks" in low:
-                    stats["dangerous_attacks"] = extract_stat_value(label, value_raw)
-
-    return stats
-
-def default_stats():
     return {
-        "minute": 0,
-        "score": "0-0",
-        "shots_on_target": 0,
-        "dangerous_attacks": 0,
-        "home": "",
-        "away": ""
+        "minute": minute,
+        "score": score,
+        "shots_on_target": shots_on_target,
+        "dangerous_attacks": dangerous_attacks,
+        "home": home,
+        "away": away
     }
+
 
 # ---------------------------------
 # LIVE ODDS (mobile odds endpoint)
 # ---------------------------------
-async def get_live_odds(match_id: str) -> dict:
+async def get_live_odds(match_name: str) -> dict:
     """
-    Fetch odds from mobile odds endpoint. Returns dict with 'over05' and 'over25' where available.
+    Fetch odds from LiveOdds API using match name search.
+    Returns dict with 'over05' and 'over25'.
     """
-    url = f"https://m.flashscore.com/x/feed/od_{match_id}{MOBILE_SUFFIX}/"
-    headers = {"User-Agent": "Mozilla/5.0 (Mobile; rv:100.0) Gecko/20100101 Firefox/100.0"}
-    async with aiohttp.ClientSession(headers=headers) as session:
+    url = f"https://api.liveodds.io/football/search?query={match_name}"
+
+    async with aiohttp.ClientSession() as session:
         try:
             async with session.get(url, timeout=10) as resp:
                 if resp.status != 200:
                     return {"over05": None, "over25": None}
-                text = await resp.text()
+                data = await resp.json()
         except Exception:
             return {"over05": None, "over25": None}
 
-    cleaned = text.replace("])}while(1);</x>", "")
-    try:
-        data = json.loads(cleaned)
-    except Exception:
+    if not data:
         return {"over05": None, "over25": None}
 
-    odds = {"over05": None, "over25": None}
-    for item in data:
-        if not isinstance(item, list) or len(item) < 3:
-            continue
-        if item[0] == "odds":
-            key = str(item[1])
-            val = item[2]
-            try:
-                valf = float(val)
-            except Exception:
-                try:
-                    valf = float(str(val).replace(",", "."))
-                except Exception:
-                    valf = None
-            if key.upper().startswith("O0.5") or "0.5" in key:
-                odds["over05"] = valf
-            if key.upper().startswith("O2.5") or "2.5" in key:
-                odds["over25"] = valf
-    return odds
+    event = data[0]  # best match
+    markets = event.get("markets", {})
+
+    return {
+        "over05": markets.get("over_0_5"),
+        "over25": markets.get("over_2_5")
+    }
+
 
 # ---------------------------------
 # TRIGGERS
@@ -478,8 +404,8 @@ async def check_matches(context: CallbackContext):
         matches_checked += 1
 
         # FIRST-HALF GOAL TRIGGER
-        odds = await get_live_odds(match_id)
-        if qualifies_for_first_half_goal(stats, odds) and match_id not in already_alerted:
+    odds = await get_live_odds(match_name)
+     if qualifies_for_first_half_goal(stats, odds) and match_id not in already_alerted:
             already_alerted.add(match_id)
             message = (
                 f"⚡ First-Half Goal Trigger!\n"
