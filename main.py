@@ -248,7 +248,7 @@ async def get_live_matches():
 # MATCH STATS (mobile detail endpoint)
 # ---------------------------------
 asynasync def get_match_stats(match_id: int) -> dict:
-    """
+ """
     Fetch match details from Sofascore.
     Extracts:
     - minute
@@ -404,8 +404,9 @@ async def check_matches(context: CallbackContext):
         matches_checked += 1
 
         # FIRST-HALF GOAL TRIGGER
-    odds = await get_live_odds(match_name)
-     if qualifies_for_first_half_goal(stats, odds) and match_id not in already_alerted:
+          # FIRST-HALF GOAL TRIGGER
+        odds = await get_live_odds(match_name)
+        if qualifies_for_first_half_goal(stats, odds) and match_id not in already_alerted:
             already_alerted.add(match_id)
             message = (
                 f"⚡ First-Half Goal Trigger!\n"
@@ -425,6 +426,7 @@ async def check_matches(context: CallbackContext):
                     logger.debug(f"Failed to send first-half alert: {e}")
             else:
                 logger.info(f"Quiet hours – first-half alert suppressed for {match_name}")
+
 
         # OVERS TRIGGER
         if qualifies_for_overs(stats) and match_id not in already_alerted:
