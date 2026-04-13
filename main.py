@@ -172,6 +172,18 @@ async def lastalert_cmd(update, context):
     await update.message.reply_text(msg, parse_mode="Markdown")
 async def acca_cmd(update, context):
     await daily_acca(context)
+async def fixtures_cmd(update, context):
+    fixtures = get_todays_fixtures()
+
+    if not fixtures:
+        await update.message.reply_text("No fixtures available for today.")
+        return
+
+    msg = "📅 *Today's Fixtures*\n\n"
+    for m in fixtures:
+        msg += f"{m.get('time', 'TBD')} – {m['home']} vs {m['away']}\n"
+
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 # ---------------------------------
 # STARTUP MESSAGE
@@ -621,6 +633,7 @@ def main():
     app.add_handler(CommandHandler("resetstats", resetstats))
     app.add_handler(CommandHandler("lastalert", lastalert_cmd))
     app.add_handler(CommandHandler("acca", acca_cmd))
+    app.add_handler(CommandHandler("fixtures", fixtures_cmd))
 
     # Scan every 60 seconds
     app.job_queue.run_repeating(check_matches, interval=60, first=10)
