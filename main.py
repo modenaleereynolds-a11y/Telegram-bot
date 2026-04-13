@@ -246,9 +246,9 @@ async def get_live_matches():
 
 # ---------------------------------
 # MATCH STATS (mobile detail endpoint)
-# ---------------------------------
-asynasync def get_match_stats(match_id: int) -> dict:
- """
+# --------------------------------
+async def get_match_stats(match_id: int) -> dict:
+    """
     Fetch match details from Sofascore.
     Extracts:
     - minute
@@ -257,6 +257,7 @@ asynasync def get_match_stats(match_id: int) -> dict:
     - dangerous_attacks
     - home, away names
     """
+
     url = f"https://api.sofascore.com/api/v1/event/{match_id}"
 
     async with aiohttp.ClientSession() as session:
@@ -404,8 +405,7 @@ async def check_matches(context: CallbackContext):
         matches_checked += 1
 
         # FIRST-HALF GOAL TRIGGER
-          # FIRST-HALF GOAL TRIGGER
-        odds = await get_live_odds(match_name)
+      odds = await get_live_odds(match_name)
         if qualifies_for_first_half_goal(stats, odds) and match_id not in already_alerted:
             already_alerted.add(match_id)
             message = (
