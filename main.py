@@ -403,7 +403,8 @@ async def check_matches(context: CallbackContext):
 
         currently_monitoring.append(match_name)
         matches_checked += 1
-                        # -----------------------------------------
+
+        # -----------------------------------------
         # 🔥 FIRST-HALF GOAL TRIGGER (HIGH INTENSITY)
         # -----------------------------------------
         odds = await get_live_odds(match_name)
@@ -430,7 +431,6 @@ async def check_matches(context: CallbackContext):
                     logger.debug(f"Failed to send high-intensity FH alert: {e}")
             else:
                 logger.info(f"Quiet hours – high-intensity FH alert suppressed for {match_name}")
-
 
         # -----------------------------------------
         # 🎯 PROBABILITY-MODEL FIRST HALF GOAL ALERT
@@ -466,16 +466,14 @@ async def check_matches(context: CallbackContext):
             else:
                 logger.info(f"Quiet hours – probability-model FH alert suppressed for {match_name}")
 
-
-            
-
-
-
-        # OVERS TRIGGER
+        # -----------------------------------------
+        # 🔥 OVERS TRIGGER
+        # -----------------------------------------
         if qualifies_for_overs(stats) and match_id not in already_alerted:
             already_alerted.add(match_id)
             pressure = calc_pressure(stats)
             now = datetime.now()
+
             last_alert = {
                 "match": match_name,
                 "time": now.strftime("%H:%M:%S"),
@@ -485,7 +483,9 @@ async def check_matches(context: CallbackContext):
                 "dangerous_attacks": stats.get("dangerous_attacks"),
                 "pressure": pressure
             }
+
             alerts_sent_today += 1
+
             message = (
                 f"🔥 Overs Trigger!\n"
                 f"{match_name}\n"
@@ -495,6 +495,7 @@ async def check_matches(context: CallbackContext):
                 f"Dangerous Attacks: {stats.get('dangerous_attacks')}\n"
                 f"Pressure: {pressure}\n"
             )
+
             if not in_quiet_hours(now):
                 try:
                     await bot.send_message(chat_id=CHAT_ID, text=message)
@@ -504,6 +505,7 @@ async def check_matches(context: CallbackContext):
                 logger.info(f"Quiet hours – overs alert suppressed for {match_name}")
 
     last_scan_time = datetime.now().strftime("%H:%M:%S")
+
 
 # ---------------------------------
 # MAIN
