@@ -170,6 +170,8 @@ async def lastalert_cmd(update, context):
     for k, v in last_alert.items():
         msg += f"{k.capitalize()}: {v}\n"
     await update.message.reply_text(msg, parse_mode="Markdown")
+async def acca_cmd(update, context):
+    await daily_acca(context)
 
 # ---------------------------------
 # STARTUP MESSAGE
@@ -618,6 +620,7 @@ def main():
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("resetstats", resetstats))
     app.add_handler(CommandHandler("lastalert", lastalert_cmd))
+    app.add_handler(CommandHandler("acca", acca_cmd))
 
     # Scan every 60 seconds
     app.job_queue.run_repeating(check_matches, interval=60, first=10)
