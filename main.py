@@ -403,35 +403,68 @@ async def check_matches(context: CallbackContext):
 
         currently_monitoring.append(match_name)
         matches_checked += 1
-        # FIRST-HALF GOAL TRIGGER
+                # FIRST-HALF GOAL TRIGGER (HIGH INTENSITY)
         odds = await get_live_odds(match_name)
+
         if qualifies_for_first_half_goal(stats, odds) and match_id not in already_alerted:
             already_alerted.add(match_id)
-            message = (
-    f"🔥 FIRST HALF GOAL ALERT — HIGH INTENSITY\n"
-    f"Match: {match_name}\n"
-    f"Minute: {stats.get('minute')}'\n"
-    f"Score: {stats.get('score')}\n"
-    f"SOT: {stats.get('shots_on_target')}\n"
-    f"Dangerous Attacks: {stats.get('dangerous_attacks')}\n"
-    f"Pressure: {calc_pressure(stats)}\n"
-    f"Odds O0.5 FH: {odds.get('over05')}\n"
-)
-# FIRST-HALF GOAL TRIGGER (HIGH INTENSITY)
-odds = await get_live_odds(match_name)
-if qualifies_for_first_half_goal(stats, odds) and match_id not in already_alerted:
-    already_alerted.add(match_id)
 
-    message = (
-        f"🔥 FIRST HALF GOAL ALERT — HIGH INTENSITY\n"
-        f"Match: {match_name}\n"
-        f"Minute: {stats.get('minute')}'\n"
-        f"Score: {stats.get('score')}\n"
-        f"SOT: {stats.get('shots_on_target')}\n"
-        f"Dangerous Attacks: {stats.get('dangerous_attacks')}\n"
-        f"Pressure: {calc_pressure(stats)}\n"
-        f"Odds O0.5 FH: {odds.get('over05')}\n"
-    )
+            message = (
+                f"🔥 FIRST HALF GOAL ALERT — HIGH INTENSITY\n"
+                f"Match: {match_name}\n"
+                f"Minute: {stats.get('minute')}'\n"
+                f"Score: {stats.get('score')}\n"
+                f"SOT: {stats.get('shots_on_target')}\n"
+                f"Dangerous Attacks: {stats.get('dangerous_attacks')}\n"
+                f"Pressure: {calc_pressure(stats)}\n"
+                f"Odds O0.5 FH: {odds.get('over05')}\n"
+            )
+
+            now = datetime.now()
+            if not in_quiet_hours(now):
+                try:
+                    await bot.send_message(chat_id=CHAT_ID, text=message)
+                except Exception as e:
+                    logger.debug(f"Failed to send high-intensity FH alert: {e}")
+            else:
+                logger.info(f"Quiet hours – high-intensity FH alert suppressed for {match_name}")
+
+
+        # -----------------------------------------
+        # 🎯 PROBABILITY-MODEL FIRST HALF GOAL ALERT
+        # -----------------------------------------
+
+        minute = stats.get("minute", 0)
+        score = stats.get("score", "")
+        over05 = odds.get("over05")
+
+        if (
+            match_id not in already_alerted and
+            score == "0-0" and
+            33 <= minute <= 45 and
+            over05 is not None and over05 >= 2.0
+        ):
+            already_alerted.add(match_id)
+
+            message = (
+                f"🎯 FIRST HALF GOAL ALERT — PROBABILITY MODEL\n"
+                f"Match: {match_name}\n"
+                f"Minute: {minute}'\n"
+                f"Score: {score}\n"
+                f"Odds O0.5 FH: {over05}\n"
+                f"Pre-match xG: High\n"
+                f"FH Goal History: Strong\n"
+            )
+
+            now = datetime.now()
+            if not in_quiet_hours(now):
+                try:
+                    await bot.send_message(chat_id=CHAT_ID, text=message)
+                except Exception as e:
+                    logger.debug(f"Failed to send probability-model FH alert: {e}")
+            else:
+                logger.info(f"Quiet hours – probability-model FH alert suppressed for {match_name}")
+
 
     now = datetime.now()
     if not in_quiet_hours(now):
