@@ -403,9 +403,8 @@ async def check_matches(context: CallbackContext):
 
         currently_monitoring.append(match_name)
         matches_checked += 1
-
         # FIRST-HALF GOAL TRIGGER
-      odds = await get_live_odds(match_name)
+        odds = await get_live_odds(match_name)
         if qualifies_for_first_half_goal(stats, odds) and match_id not in already_alerted:
             already_alerted.add(match_id)
             message = (
@@ -426,6 +425,7 @@ async def check_matches(context: CallbackContext):
                     logger.debug(f"Failed to send first-half alert: {e}")
             else:
                 logger.info(f"Quiet hours – first-half alert suppressed for {match_name}")
+
 
 
         # OVERS TRIGGER
