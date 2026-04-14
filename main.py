@@ -193,6 +193,38 @@ async def debug_fixtures_cmd(update, context):
     msg += f"Date: {today}\n\n"
 
     async with aiohttp.ClientSession() as session:
+async def debugfixtures_new(update, context):
+    chat_id = update.effective_chat.id
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    url = f"https://api.sofascore.com/api/v1/sport/football/events/{today}"
+
+    msg = f"🆕 *New Fixtures Endpoint Debug*\nDate: {today}\n\n"
+    msg += f"URL: {url}\n\n"
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, timeout=10) as resp:
+                msg += f"HTTP Status: {resp.status}\n"
+                if resp.status != 200:
+                    await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
+                    return
+
+                data = await resp.json()
+                events = data.get("events", [])
+
+                msg += f"Events returned: {len(events)}\n\n"
+
+                if events:
+                    e = events[0]
+                    msg += f"Sample: {e.get('homeTeam', {}).get('name')} vs {e.get('awayTeam', {}).get('name')}\n"
+                else:
+                    msg += "No events in response.\n"
+
+        except Exception as e:
+            msg += f"Exception: {e}\n"
+
+    await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
 
         # 1️⃣ MOBILE FEED
         mobile_url = f"https://api.sofascore.com/mobile/v4/sport/football/scheduled-events/{today}"
@@ -761,6 +793,7 @@ def main():
     app.add_handler(CommandHandler("acca", acca_cmd))
     app.add_handler(CommandHandler("fixtures", fixtures_cmd))
     app.add_handler(CommandHandler("debugfixtures", debug_fixtures_cmd))
+    app.add_handler(CommandHandler("debugfixtures_new", debugfixtures_new))
 
     # Scan every 60 seconds
     app.job_queue.run_repeating(check_matches, interval=60, first=10)
