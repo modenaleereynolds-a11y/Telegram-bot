@@ -312,7 +312,7 @@ async def morning_shortlist(context: CallbackContext):
             f"*Suggested bet:* {m['recommended']}\n\n"
         )
     await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
- async def daily_acca(context: CallbackContext):
+async def daily_acca(context: CallbackContext):
     chat_id = int(CHAT_ID)
 
     # Fetch today's fixtures
