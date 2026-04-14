@@ -173,7 +173,8 @@ async def lastalert_cmd(update, context):
 async def acca_cmd(update, context):
     await daily_acca(context)
 async def fixtures_cmd(update, context):
-    fixtures = get_todays_fixtures()
+    fixtures = await get_todays_fixtures()
+
 
     if not fixtures:
         await update.message.reply_text("No fixtures available for today.")
