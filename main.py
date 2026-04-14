@@ -253,33 +253,6 @@ async def get_todays_fixtures():
     return fixtures
 
 
-    events = data.get("events", [])
-    fixtures = []
-
-    for ev in events:
-        match_id = ev.get("id")
-        home = ev.get("homeTeam", {}).get("name")
-        away = ev.get("awayTeam", {}).get("name")
-        home_id = ev.get("homeTeam", {}).get("id")
-        away_id = ev.get("awayTeam", {}).get("id")
-
-        start_ts = ev.get("startTimestamp")
-        if start_ts:
-            time_str = datetime.fromtimestamp(start_ts).strftime("%H:%M")
-        else:
-            time_str = "TBD"
-
-        if match_id and home and away:
-            fixtures.append({
-                "id": match_id,
-                "time": time_str,
-                "home": home,
-                "away": away,
-                "home_id": home_id,
-                "away_id": away_id
-            })
-
-    return fixtures
 
 
 def get_last_five_stats(team):
