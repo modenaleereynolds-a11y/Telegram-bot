@@ -201,7 +201,7 @@ async def send_startup_message(app):
 # ---------------------------------
 async def get_todays_fixtures():
     """
-    Fetch today's fixtures from Sofascore.
+    Fetch today's fixtures using the Sofascore MOBILE feed (much more reliable).
     Returns a list of dicts:
     {
         "id": match_id,
@@ -213,7 +213,7 @@ async def get_todays_fixtures():
     }
     """
     today = datetime.now().strftime("%Y-%m-%d")
-    url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{today}"
+    url = f"https://api.sofascore.com/mobile/v4/sport/football/scheduled-events/{today}"
 
     async with aiohttp.ClientSession() as session:
         try:
@@ -223,6 +223,35 @@ async def get_todays_fixtures():
                 data = await resp.json()
         except Exception:
             return []
+
+    events = data.get("events", [])
+    fixtures = []
+
+    for ev in events:
+        match_id = ev.get("id")
+        home = ev.get("homeTeam", {}).get("name")
+        away = ev.get("awayTeam", {}).get("name")
+        home_id = ev.get("homeTeam", {}).get("id")
+        away_id = ev.get("awayTeam", {}).get("id")
+
+        start_ts = ev.get("startTimestamp")
+        if start_ts:
+            time_str = datetime.fromtimestamp(start_ts).strftime("%H:%M")
+        else:
+            time_str = "TBD"
+
+        if match_id and home and away:
+            fixtures.append({
+                "id": match_id,
+                "time": time_str,
+                "home": home,
+                "away": away,
+                "home_id": home_id,
+                "away_id": away_id
+            })
+
+    return fixtures
+
 
     events = data.get("events", [])
     fixtures = []
