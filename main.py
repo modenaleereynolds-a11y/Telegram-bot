@@ -170,11 +170,12 @@ async def lastalert_cmd(update, context):
     for k, v in last_alert.items():
         msg += f"{k.capitalize()}: {v}\n"
     await update.message.reply_text(msg, parse_mode="Markdown")
+
 async def acca_cmd(update, context):
     await daily_acca(context)
+
 async def fixtures_cmd(update, context):
     fixtures = await get_todays_fixtures()
-
 
     if not fixtures:
         await update.message.reply_text("No fixtures available for today.")
@@ -185,6 +186,11 @@ async def fixtures_cmd(update, context):
         msg += f"{m.get('time', 'TBD')} – {m['home']} vs {m['away']}\n"
 
     await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+# ---------------------------------------------------------
+# OLD DEBUG COMMAND (expected to show 404/403/0)
+# ---------------------------------------------------------
 async def debug_fixtures_cmd(update, context):
     chat_id = update.effective_chat.id
     today = datetime.now().strftime("%Y-%m-%d")
@@ -193,6 +199,64 @@ async def debug_fixtures_cmd(update, context):
     msg += f"Date: {today}\n\n"
 
     async with aiohttp.ClientSession() as session:
+
+        # 1️⃣ MOBILE FEED
+        mobile_url = f"https://api.sofascore.com/mobile/v4/sport/football/scheduled-events/{today}"
+        try:
+            async with session.get(mobile_url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    events = data.get("events", [])
+                    msg += f"📱 Mobile feed: {len(events)} events\n"
+                else:
+                    msg += f"📱 Mobile feed ERROR: HTTP {resp.status}\n"
+        except Exception as e:
+            msg += f"📱 Mobile feed EXCEPTION: {e}\n"
+
+        # 2️⃣ OLD API FEED
+        old_url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{today}"
+        try:
+            async with session.get(old_url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    events = data.get("events", [])
+                    msg += f"🖥 Old API feed: {len(events)} events\n"
+                else:
+                    msg += f"🖥 Old API feed ERROR: HTTP {resp.status}\n"
+        except Exception as e:
+            msg += f"🖥 Old API feed EXCEPTION: {e}\n"
+
+        # 3️⃣ TOURNAMENT SCAN
+        tournaments_url = "https://api.sofascore.com/api/v1/sport/football/tournaments"
+        total_events = 0
+        try:
+            async with session.get(tournaments_url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    tournaments = data.get("tournaments", [])
+                    for t in tournaments[:20]:
+                        tid = t.get("id")
+                        if not tid:
+                            continue
+                        t_url = f"https://api.sofascore.com/api/v1/tournament/{tid}/events/{today}"
+                        try:
+                            async with session.get(t_url, timeout=10) as t_resp:
+                                if t_resp.status == 200:
+                                    t_data = await t_resp.json()
+                                    evs = t_data.get("events", [])
+                                    total_events += len(evs)
+                        except:
+                            pass
+                msg += f"🏆 Tournament scan: {total_events} events\n"
+        except Exception as e:
+            msg += f"🏆 Tournament scan EXCEPTION: {e}\n"
+
+    await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
+
+
+# ---------------------------------------------------------
+# NEW DEBUG COMMAND (tests the NEW working endpoint)
+# ---------------------------------------------------------
 async def debugfixtures_new(update, context):
     chat_id = update.effective_chat.id
     today = datetime.now().strftime("%Y-%m-%d")
@@ -226,66 +290,6 @@ async def debugfixtures_new(update, context):
 
     await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
 
-        # 1️⃣ MOBILE FEED
-        mobile_url = f"https://api.sofascore.com/mobile/v4/sport/football/scheduled-events/{today}"
-        try:
-            async with session.get(mobile_url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    events = data.get("events", [])
-                    msg += f"📱 Mobile feed: {len(events)} events\n"
-                    if events:
-                        msg += f"Sample: {events[0].get('homeTeam', {}).get('name')} vs {events[0].get('awayTeam', {}).get('name')}\n\n"
-                    else:
-                        msg += "Sample: None\n\n"
-                else:
-                    msg += f"📱 Mobile feed ERROR: HTTP {resp.status}\n\n"
-        except Exception as e:
-            msg += f"📱 Mobile feed EXCEPTION: {e}\n\n"
-
-        # 2️⃣ OLD API FEED
-        old_url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{today}"
-        try:
-            async with session.get(old_url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    events = data.get("events", [])
-                    msg += f"🖥 Old API feed: {len(events)} events\n"
-                    if events:
-                        msg += f"Sample: {events[0].get('homeTeam', {}).get('name')} vs {events[0].get('awayTeam', {}).get('name')}\n\n"
-                    else:
-                        msg += "Sample: None\n\n"
-                else:
-                    msg += f"🖥 Old API feed ERROR: HTTP {resp.status}\n\n"
-        except Exception as e:
-            msg += f"🖥 Old API feed EXCEPTION: {e}\n\n"
-
-        # 3️⃣ TOURNAMENT SCAN
-        tournaments_url = "https://api.sofascore.com/api/v1/sport/football/tournaments"
-        total_events = 0
-        try:
-            async with session.get(tournaments_url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    tournaments = data.get("tournaments", [])
-                    for t in tournaments[:20]:
-                        tid = t.get("id")
-                        if not tid:
-                            continue
-                        t_url = f"https://api.sofascore.com/api/v1/tournament/{tid}/events/{today}"
-                        try:
-                            async with session.get(t_url, timeout=10) as t_resp:
-                                if t_resp.status == 200:
-                                    t_data = await t_resp.json()
-                                    evs = t_data.get("events", [])
-                                    total_events += len(evs)
-                        except:
-                            pass
-                msg += f"🏆 Tournament scan: {total_events} events\n"
-        except Exception as e:
-            msg += f"🏆 Tournament scan EXCEPTION: {e}\n"
-
-    await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
 
 # ---------------------------------
 # STARTUP MESSAGE
