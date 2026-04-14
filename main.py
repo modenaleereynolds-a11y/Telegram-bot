@@ -201,32 +201,104 @@ async def send_startup_message(app):
 # ---------------------------------
 async def get_todays_fixtures():
     """
-    Fetch today's fixtures using the Sofascore MOBILE feed (much more reliable).
-    Returns a list of dicts:
-    {
-        "id": match_id,
-        "time": "15:00",
-        "home": "Team A",
-        "away": "Team B",
-        "home_id": 123,
-        "away_id": 456
-    }
+    Bulletproof fixtures loader:
+    1) Mobile feed
+    2) Old API feed
+    3) Tournament-by-tournament fallback
+    Includes debug logging.
     """
+
     today = datetime.now().strftime("%Y-%m-%d")
-    url = f"https://api.sofascore.com/mobile/v4/sport/football/scheduled-events/{today}"
+
+    # -------------------------------
+    # 1️⃣ MOBILE FEED (PRIMARY)
+    # -------------------------------
+    mobile_url = f"https://api.sofascore.com/mobile/v4/sport/football/scheduled-events/{today}"
+    logger.info(f"[Fixtures] Trying MOBILE feed: {mobile_url}")
 
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, timeout=10) as resp:
+            async with session.get(mobile_url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    events = data.get("events", [])
+                    logger.info(f"[Fixtures] Mobile feed returned {len(events)} events")
+                    if events:
+                        return _parse_fixtures(events)
+        except Exception as e:
+            logger.warning(f"[Fixtures] Mobile feed error: {e}")
+
+    # -------------------------------
+    # 2️⃣ OLD API FEED (FALLBACK)
+    # -------------------------------
+    old_url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{today}"
+    logger.info(f"[Fixtures] Trying OLD API feed: {old_url}")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(old_url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    events = data.get("events", [])
+                    logger.info(f"[Fixtures] Old API returned {len(events)} events")
+                    if events:
+                        return _parse_fixtures(events)
+    except Exception as e:
+        logger.warning(f"[Fixtures] Old API feed error: {e}")
+
+    # -------------------------------
+    # 3️⃣ TOURNAMENT-BY-TOURNAMENT (DEEP SCAN)
+    # -------------------------------
+    logger.info("[Fixtures] Trying TOURNAMENT fallback scan")
+
+    tournaments_url = "https://api.sofascore.com/api/v1/sport/football/tournaments"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(tournaments_url, timeout=10) as resp:
                 if resp.status != 200:
+                    logger.warning("[Fixtures] Tournament list unavailable")
                     return []
+
                 data = await resp.json()
-        except Exception:
-            return []
+                tournaments = data.get("tournaments", [])
+                logger.info(f"[Fixtures] Found {len(tournaments)} tournaments to scan")
 
-    events = data.get("events", [])
+                all_events = []
+
+                for t in tournaments[:40]:  # limit for speed
+                    tid = t.get("id")
+                    if not tid:
+                        continue
+
+                    t_url = f"https://api.sofascore.com/api/v1/tournament/{tid}/events/{today}"
+                    try:
+                        async with session.get(t_url, timeout=10) as t_resp:
+                            if t_resp.status == 200:
+                                t_data = await t_resp.json()
+                                evs = t_data.get("events", [])
+                                if evs:
+                                    all_events.extend(evs)
+                    except:
+                        continue
+
+                logger.info(f"[Fixtures] Tournament scan found {len(all_events)} events")
+
+                if all_events:
+                    return _parse_fixtures(all_events)
+
+    except Exception as e:
+        logger.warning(f"[Fixtures] Tournament fallback error: {e}")
+
+    # -------------------------------
+    # NOTHING FOUND
+    # -------------------------------
+    logger.warning("[Fixtures] FINAL RESULT: No fixtures found today")
+    return []
+
+
+def _parse_fixtures(events):
+    """Helper to convert Sofascore events into your fixture dict format."""
     fixtures = []
-
     for ev in events:
         match_id = ev.get("id")
         home = ev.get("homeTeam", {}).get("name")
