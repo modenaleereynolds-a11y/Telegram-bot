@@ -198,8 +198,59 @@ async def send_startup_message(app):
 # ---------------------------------
 # PRE-MATCH PLACEHOLDERS (unchanged)
 # ---------------------------------
-def get_todays_fixtures():
-    return []
+async def get_todays_fixtures():
+    """
+    Fetch today's fixtures from Sofascore.
+    Returns a list of dicts:
+    {
+        "id": match_id,
+        "time": "15:00",
+        "home": "Team A",
+        "away": "Team B",
+        "home_id": 123,
+        "away_id": 456
+    }
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{today}"
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+        except Exception:
+            return []
+
+    events = data.get("events", [])
+    fixtures = []
+
+    for ev in events:
+        match_id = ev.get("id")
+        home = ev.get("homeTeam", {}).get("name")
+        away = ev.get("awayTeam", {}).get("name")
+        home_id = ev.get("homeTeam", {}).get("id")
+        away_id = ev.get("awayTeam", {}).get("id")
+
+        start_ts = ev.get("startTimestamp")
+        if start_ts:
+            time_str = datetime.fromtimestamp(start_ts).strftime("%H:%M")
+        else:
+            time_str = "TBD"
+
+        if match_id and home and away:
+            fixtures.append({
+                "id": match_id,
+                "time": time_str,
+                "home": home,
+                "away": away,
+                "home_id": home_id,
+                "away_id": away_id
+            })
+
+    return fixtures
+
 
 def get_last_five_stats(team):
     return {"avg_goals_scored": 0, "btts_percent": 0}
@@ -212,7 +263,7 @@ def get_odds(match_id):
 
 async def morning_shortlist(context: CallbackContext):
     chat_id = int(CHAT_ID)
-    fixtures = get_todays_fixtures()
+    fixtures = await get_todays_fixtures()
     shortlist = []
     for match in fixtures:
         home = match["home"]
@@ -261,11 +312,11 @@ async def morning_shortlist(context: CallbackContext):
             f"*Suggested bet:* {m['recommended']}\n\n"
         )
     await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
-async def daily_acca(context: CallbackContext):
+ async def daily_acca(context: CallbackContext):
     chat_id = int(CHAT_ID)
 
-    # Fetch today's fixtures (your placeholder function)
-    fixtures = get_todays_fixtures()
+    # Fetch today's fixtures
+    fixtures = await get_todays_fixtures()
     if not fixtures:
         await context.bot.send_message(chat_id, "No fixtures available for today's ACCA.")
         return
@@ -302,6 +353,34 @@ async def daily_acca(context: CallbackContext):
 
     if len(acca_list) < 3:
         await context.bot.send_message(chat_id, "No suitable 3-leg O2.5 ACCA found today.")
+        return
+
+    # Sort by combined O2.5 %
+    acca_list.sort(key=lambda x: x["combined"], reverse=True)
+
+    # Take top 3
+    picks = acca_list[:3]
+
+    # Calculate combined odds
+    acca_price = round(picks[0]["odds"] * picks[1]["odds"] * picks[2]["odds"], 2)
+
+    # Build message
+    msg = "🎯 *Daily O2.5 ACCA (Stats-Based)*\n"
+    msg += "_Teams with 70%+ Over 2.5 in their last 10 matches._\n\n"
+
+    for p in picks:
+        msg += (
+            f"*{p['home']} vs {p['away']}*\n"
+            f"Home O2.5: {p['home_o25']}%\n"
+            f"Away O2.5: {p['away_o25']}%\n"
+            f"Combined: {p['combined']}%\n"
+            f"O2.5 Odds: {p['odds']}\n\n"
+        )
+
+    msg += f"*Combined ACCA Odds:* {acca_price}"
+
+    await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
+
         return
 
     # Sort by combined O2.5 %
