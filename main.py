@@ -389,19 +389,39 @@ async def daily_acca(context: CallbackContext):
 # ---------------------------------
 async def get_live_matches():
     """
-    Fetch all live football events from Sofascore.
-    Returns a list of match IDs (integers).
+    Fetch live matches using mobile feed first.
+    Fallback to old API if mobile feed returns nothing.
+    Returns a list of match IDs.
     """
-    url = "https://api.sofascore.com/api/v1/sport/football/events/live"
+
+    # 1️⃣ Try MOBILE live feed (most reliable)
+    mobile_url = "https://api.sofascore.com/mobile/v4/sport/football/events/live"
 
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, timeout=10) as resp:
+            async with session.get(mobile_url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    events = data.get("events", [])
+                    if events:
+                        return [e["id"] for e in events if "id" in e]
+        except Exception:
+            pass  # ignore and fallback
+
+    # 2️⃣ Fallback: OLD API live feed
+    fallback_url = "https://api.sofascore.com/api/v1/sport/football/events/live"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(fallback_url, timeout=10) as resp:
                 if resp.status != 200:
                     return []
                 data = await resp.json()
-        except Exception:
-            return []
+                events = data.get("events", [])
+                return [e["id"] for e in events if "id" in e]
+    except Exception:
+        return []
+
 
     events = data.get("events", [])
     match_ids = [e["id"] for e in events if "id" in e]
