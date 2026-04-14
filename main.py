@@ -381,33 +381,7 @@ async def morning_shortlist(context: CallbackContext):
 
     await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
 
-        return
-
-    # Sort by combined O2.5 %
-    acca_list.sort(key=lambda x: x["combined"], reverse=True)
-
-    # Take top 3
-    picks = acca_list[:3]
-
-    # Calculate combined odds
-    acca_price = round(picks[0]["odds"] * picks[1]["odds"] * picks[2]["odds"], 2)
-
-    # Build message
-    msg = "🎯 *Daily O2.5 ACCA (Stats-Based)*\n"
-    msg += "_Teams with 70%+ Over 2.5 in their last 10 matches._\n\n"
-
-    for p in picks:
-        msg += (
-            f"*{p['home']} vs {p['away']}*\n"
-            f"Home O2.5: {p['home_o25']}%\n"
-            f"Away O2.5: {p['away_o25']}%\n"
-            f"Combined: {p['combined']}%\n"
-            f"O2.5 Odds: {p['odds']}\n\n"
-        )
-
-    msg += f"*Combined ACCA Odds:* {acca_price}"
-
-    await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
+      
 
 # ---------------------------------
 # MOBILE JSON LIVE MATCH LIST SCANNER (bulletproof)
